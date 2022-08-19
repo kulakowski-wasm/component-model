@@ -56,7 +56,7 @@ Notes:
 core:instance       ::= ie:<instance-expr>                                 => (instance ie)
 core:instanceexpr   ::= 0x00 m:<moduleidx> arg*:vec(<core:instantiatearg>) => (instantiate m arg*)
                       | 0x01 e*:vec(<core:export>)                         => e*
-core:instantiatearg ::= n:<name> 0x12 i:<instanceidx>                      => (with n (instance i))
+core:instantiatearg ::= n:<core:name> 0x12 i:<instanceidx>                 => (with n (instance i))
 core:sortidx        ::= sort:<core:sort> idx:<u32>                         => (sort idx)
 core:sort           ::= 0x00                                               => func
                       | 0x01                                               => table
@@ -65,12 +65,12 @@ core:sort           ::= 0x00                                               => fu
                       | 0x10                                               => type
                       | 0x11                                               => module
                       | 0x12                                               => instance
-core:export         ::= n:<name> si:<core:sortidx>                         => (export n si)
+core:export         ::= n:<core:name> si:<core:sortidx>                    => (export n si)
 
 instance            ::= ie:<instance-expr>                                 => (instance ie)
 instanceexpr        ::= 0x00 c:<componentidx> arg*:vec(<instantiatearg>)   => (instantiate c arg*)
                       | 0x01 e*:vec(<export>)                              => e*
-instantiatearg      ::= n:<name> si:<sortidx>                              => (with n si)
+instantiatearg      ::= n:<importname> si:<sortidx>                        => (with n si)
 sortidx             ::= sort:<sort> idx:<u32>                              => (sort idx)
 sort                ::= 0x00 cs:<core:sort>                                => core cs
                       | 0x01                                               => func
@@ -78,7 +78,6 @@ sort                ::= 0x00 cs:<core:sort>                                => co
                       | 0x03                                               => type
                       | 0x04                                               => component
                       | 0x05                                               => instance
-export              ::= n:<name> si:<sortidx>                              => (export n si)
 ```
 Notes:
 * Reused Core binary rules: [`core:name`], (variable-length encoded) [`core:u32`]
@@ -99,10 +98,10 @@ Notes:
 
 (See [Alias Definitions](Explainer.md#alias-definitions) in the explainer.)
 ```
-alias            ::= s:<sort> t:<aliastarget>           => (alias t (s))
-aliastarget      ::= 0x00 i:<instanceidx> n:<name>      => export i n
-                   | 0x01 i:<core:instanceidx> n:<name> => core export i n
-                   | 0x02 ct:<u32> idx:<u32>            => outer ct idx
+alias       ::= s:<sort> t:<aliastarget>                => (alias t (s))
+aliastarget ::= 0x00 i:<instanceidx> n:<exportname>     => export i n
+              | 0x01 i:<core:instanceidx> n:<core:name> => core export i n
+              | 0x02 ct:<u32> idx:<u32>                 => outer ct idx
 ```
 Notes:
 * Reused Core binary rules: (variable-length encoded) [`core:u32`]
@@ -133,7 +132,7 @@ core:moduledecl  ::= 0x00 i:<core:import>               => i
 core:alias       ::= s:<core:sort> t:<core:aliastarget> => (alias t (s))
 core:aliastarget ::= 0x01 ct:<u32> idx:<u32>            => outer ct idx
 core:importdecl  ::= i:<core:import>                    => i
-core:exportdecl  ::= n:<name> d:<core:importdesc>       => (export n d)
+core:exportdecl  ::= n:<core:name> d:<core:importdesc>  => (export n d)
 ```
 Notes:
 * Reused Core binary rules: [`core:import`], [`core:importdesc`], [`core:functype`]
@@ -148,61 +147,65 @@ Notes:
   means that the maximum `ct` in an MVP `alias` declarator is `1`.
 
 ```
-type          ::= dt:<deftype>                            => (type dt)
-deftype       ::= dvt:<defvaltype>                        => dvt
-                | ft:<functype>                           => ft
-                | ct:<componenttype>                      => ct
-                | it:<instancetype>                       => it
-primvaltype   ::= 0x7f                                    => bool
-                | 0x7e                                    => s8
-                | 0x7d                                    => u8
-                | 0x7c                                    => s16
-                | 0x7b                                    => u16
-                | 0x7a                                    => s32
-                | 0x79                                    => u32
-                | 0x78                                    => s64
-                | 0x77                                    => u64
-                | 0x76                                    => float32
-                | 0x75                                    => float64
-                | 0x74                                    => char
-                | 0x73                                    => string
-defvaltype    ::= pvt:<primvaltype>                       => pvt
-                | 0x72 nt*:vec(<namedvaltype>)            => (record (field nt)*)
-                | 0x71 case*:vec(<case>)                  => (variant case*)
-                | 0x70 t:<valtype>                        => (list t)
-                | 0x6f t*:vec(<valtype>)                  => (tuple t*)
-                | 0x6e n*:vec(<name>)                     => (flags n*)
-                | 0x6d n*:vec(<name>)                     => (enum n*)
-                | 0x6c t*:vec(<valtype>)                  => (union t*)
-                | 0x6b t:<valtype>                        => (option t)
-                | 0x6a t?:<casetype> u?:<casetype>        => (result t? (error u)?)
-namedvaltype  ::= n:<name> t:<valtype>                    => n t
-case          ::= n:<name> t?:<casetype> 0x0              => (case n t?)
-                | n:<name> t?:<casetype> 0x1 i:<u32>      => (case n t? (refines case-label[i]))
-casetype      ::= 0x00                                    =>
-                | 0x01 t:<valtype>                        => t
-valtype       ::= i:<typeidx>                             => i
-                | pvt:<primvaltype>                       => pvt
-functype      ::= 0x40 p*:<funcvec> r*:<funcvec>          => (func (param p)* (result r)*)
-funcvec       ::= 0x00 t:<valtype>                        => [t]
-                | 0x01 nt*:vec(<namedvaltype>)            => nt*
-componenttype ::= 0x41 cd*:vec(<componentdecl>)           => (component cd*)
-instancetype  ::= 0x42 id*:vec(<instancedecl>)            => (instance id*)
-componentdecl ::= 0x03 id:<importdecl>                    => id
-                | id:<instancedecl>                       => id
-instancedecl  ::= 0x00 t:<core:type>                      => t
-                | 0x01 t:<type>                           => t
-                | 0x02 a:<alias>                          => a
-                | 0x04 ed:<exportdecl>                    => ed
-importdecl    ::= n:<name> ed:<externdesc>                => (import n ed)
-exportdecl    ::= n:<name> ed:<externdesc>                => (export n ed)
-externdesc    ::= 0x00 0x11 i:<core:typeidx>              => (core module (type i))
-                | 0x01 i:<typeidx>                        => (func (type i))
-                | 0x02 t:<valtype>                        => (value t)
-                | 0x03 b:<typebound>                      => (type b)
-                | 0x04 i:<typeidx>                        => (instance (type i))
-                | 0x05 i:<typeidx>                        => (component (type i))
-typebound     ::= 0x00 i:<typeidx>                        => (eq i)
+type          ::= dt:<deftype>                                => (type dt)
+deftype       ::= dvt:<defvaltype>                            => dvt
+                | ft:<functype>                               => ft
+                | ct:<componenttype>                          => ct
+                | it:<instancetype>                           => it
+primvaltype   ::= 0x7f                                        => bool
+                | 0x7e                                        => s8
+                | 0x7d                                        => u8
+                | 0x7c                                        => s16
+                | 0x7b                                        => u16
+                | 0x7a                                        => s32
+                | 0x79                                        => u32
+                | 0x78                                        => s64
+                | 0x77                                        => u64
+                | 0x76                                        => float32
+                | 0x75                                        => float64
+                | 0x74                                        => char
+                | 0x73                                        => string
+defvaltype    ::= pvt:<primvaltype>                           => pvt
+                | 0x72 nt*:vec(<namedvaltype>)                => (record (field nt)*)
+                | 0x71 case*:vec(<case>)                      => (variant case*)
+                | 0x70 t:<valtype>                            => (list t)
+                | 0x6f t*:vec(<valtype>)                      => (tuple t*)
+                | 0x6e n*:vec(<name>)                         => (flags n*)
+                | 0x6d n*:vec(<name>)                         => (enum n*)
+                | 0x6c t*:vec(<valtype>)                      => (union t*)
+                | 0x6b t:<valtype>                            => (option t)
+                | 0x6a t?:<valtype>? u?:<valtype>?            => (result t? (error u)?)
+namedvaltype  ::= n:<name> t:<valtype>                        => n t
+case          ::= n:<name> t?:<valtype>? r?:<u32>?            => (case n t? (refines case-label[r])?)
+name          ::= len:<u32> n:<name-chars>                    => n (if len = |n|)
+name-chars    ::= w:<word>                                    => w
+                | n:<name> 0x2d w:<word>                      => n-w
+word          ::= w:[0x61-0x7a] x*:[0x30-0x39,0x61-0x7a]*     => char(w)char(x)*
+                | W:[0x41-0x5a] X*:[0x30-0x39,0x41-0x5a]*     => char(W)char(X)*
+<T>?          ::= 0x00                                        =>
+                | 0x01 t:<T>                                  => t
+valtype       ::= i:<typeidx>                                 => i
+                | pvt:<primvaltype>                           => pvt
+functype      ::= 0x40 p*:<funcvec> r*:<funcvec>              => (func (param p)* (result r)*)
+funcvec       ::= 0x00 t:<valtype>                            => [t]
+                | 0x01 nt*:vec(<namedvaltype>)                => nt*
+componenttype ::= 0x41 cd*:vec(<componentdecl>)               => (component cd*)
+instancetype  ::= 0x42 id*:vec(<instancedecl>)                => (instance id*)
+componentdecl ::= 0x03 id:<importdecl>                        => id
+                | id:<instancedecl>                           => id
+instancedecl  ::= 0x00 t:<core:type>                          => t
+                | 0x01 t:<type>                               => t
+                | 0x02 a:<alias>                              => a
+                | 0x04 ed:<exportdecl>                        => ed
+importdecl    ::= n:<importname> i:<interface> t:<externdesc> => (import n i t)
+exportdecl    ::= n:<exportname> i:<interface> t:<externdesc> => (export n i t)
+externdesc    ::= 0x00 0x11 i:<core:typeidx>                  => (core module (type i))
+                | 0x01 i:<typeidx>                            => (func (type i))
+                | 0x02 t:<valtype>                            => (value t)
+                | 0x03 b:<typebound>                          => (type b)
+                | 0x04 i:<typeidx>                            => (instance (type i))
+                | 0x05 i:<typeidx>                            => (component (type i))
+typebound     ::= 0x00 i:<typeidx>                            => (eq i)
 ```
 Notes:
 * The type opcodes follow the same negative-SLEB128 scheme as Core WebAssembly,
@@ -214,6 +217,8 @@ Notes:
 * As described in the explainer, each component and instance type is validated
   with an initially-empty type index space. Outer aliases can be used to pull
   in type definitions from containing components.
+* The definition and validation rules for `importname`, `exportname` and
+  `interface` are given below.
 * Validation of `externdesc` requires the various `typeidx` type constructors
   to match the preceding `sort`.
 * Validation of function parameter and result names, record field names,
@@ -285,13 +290,36 @@ flags are set.
 (See [Import and Export Definitions](Explainer.md#import-and-export-definitions)
 in the explainer.)
 ```
-import ::= n:<name> ed:<externdesc> => (import n ed)
-export ::= n:<name> si:<sortidx>    => (export n si)
+import     ::= n:<importname> i:<interface> t:<externdesc> => (import n i t)
+export     ::= n:<exportname> i:<interface> si:<sortidx>   => (export n i si)
+importname ::= 0x00                                        => ϵ
+             | 0x01 n:<name> pos?:<u32>?                   => n pos?
+             | 0x02 url:<URL>                              => (implicit url)
+exportname ::= 0x00                                        => ϵ
+             | 0x01 n:<name>                               => n
+interface  ::= 0x00                                        => ϵ
+             | 0x01 url:<URL                               => (interface url)
+URL        ::= b*:vec(byte)                                => char(b)*, if char(b)* parses as a URL
 ```
 Notes:
-* Validation requires all import and export `name`s are unique.
+* The "parses as a URL" condition is defined by executing the [basic URL
+  parser] of the [URL Standard] with `char(b)*` as *input*, no optional
+  parameters and non-fatal validation errors (which coincides with standard URL
+  implementations in, e.g., Rust and JS).
 * Validation requires any exported `sortidx` to have a valid `externdesc`
   (which disallows core sorts other than `core module`).
+* All `name`s must be unique (among imports and exports, respectively).
+* All `implicit` `URL`s` must be unique.
+* All `u32`s must be unique and form a contiguous sequence starting from `0`.
+* If an import/export has an empty name and the imported/exported type is an
+  instance, then that instance's exports are added as imports/exports to the
+  containing scope (validating the same uniqueness conditions as above). If the
+  imported/exported type is anything else, validation requires that there be
+  only a single import/export, respectively.
+* Component subtyping treats the `URL` of `interface` as a structural part of
+  the import/export type. Thus, the presence/absence and exact `interface`
+  `URL`s must match when validating the arguments against the import types in
+  an `instantiate` expression.
 
 
 [`core:u32`]: https://webassembly.github.io/spec/core/binary/values.html#integers
@@ -306,3 +334,6 @@ Notes:
 
 [type-imports]: https://github.com/WebAssembly/proposal-type-imports/blob/master/proposals/type-imports/Overview.md
 [module-linking]: https://github.com/WebAssembly/module-linking/blob/main/proposals/module-linking/Explainer.md
+
+[Basic URL Parser]: https://url.spec.whatwg.org/#concept-basic-url-parser
+[URL Standard]: https://url.spec.whatwg.org

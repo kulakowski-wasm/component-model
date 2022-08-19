@@ -130,8 +130,8 @@ The syntax for defining a core module instance is:
 core:instance       ::= (instance <id>? <core:instancexpr>)
 core:instanceexpr   ::= (instantiate <core:moduleidx> <core:instantiatearg>*)
                       | <core:export>*
-core:instantiatearg ::= (with <name> (instance <core:instanceidx>))
-                      | (with <name> (instance <core:export>*))
+core:instantiatearg ::= (with <core:name> (instance <core:instanceidx>))
+                      | (with <core:name> (instance <core:export>*))
 core:sortidx        ::= (<core:sort> <u32>)
 core:sort           ::= func
                       | table
@@ -140,17 +140,17 @@ core:sort           ::= func
                       | type
                       | module
                       | instance
-core:export         ::= (export <name> <core:sortidx>)
+core:export         ::= (export <core:name> <core:sortidx>)
 ```
 When instantiating a module via `instantiate`, the two-level imports of the
 core modules are resolved as follows:
-1. The first `name` of the import is looked up in the named list of
+1. The first `core:name` of the import is looked up in the named list of
    `core:instantiatearg` to select a core module instance. (In the future,
    other `core:sort`s could be allowed if core wasm adds single-level
    imports.)
-2. The second `name` of the import is looked up in the named list of exports of
-   the core module instance found by the first step to select the imported
-   core definition.
+2. The second `core:name` of the import is looked up in the named list of
+   exports of the core module instance found by the first step to select the
+   imported core definition.
 
 Each `core:sort` corresponds 1:1 with a distinct [index space] that contains
 only core definitions of that *sort*. The `u32` field of `core:sortidx`
@@ -187,8 +187,8 @@ instances, but with an expanded component-level definition of `sort`:
 instance       ::= (instance <id>? <instanceexpr>)
 instanceexpr   ::= (instantiate <componentidx> <instantiatearg>*)
                  | <export>*
-instantiatearg ::= (with <name> <sortidx>)
-                 | (with <name> (instance <export>*))
+instantiatearg ::= (with <importname> <sortidx>)
+                 | (with <importname> (instance <export>*))
 sortidx        ::= (<sort> <u32>)
 sort           ::= core <core:sort>
                  | func
@@ -196,7 +196,6 @@ sort           ::= core <core:sort>
                  | type
                  | component
                  | instance
-export         ::= (export <name> <sortidx>)
 ```
 Because component-level function, type and instance definitions are different
 than core-level function, type and instance definitions, they are put into
@@ -206,6 +205,9 @@ and export various core definitions (when they are compatible with the
 future include `data`). Thus, component-level `sort` injects the full set
 of `core:sort`, so that they may be referenced (leaving it up to validation
 rules to throw out the core sorts that aren't allowed in various contexts).
+
+The definitions of `importname` and `export` are given in the
+[imports and exports](#import-and-export-definitions) section below.
 
 The `value` sort refers to a value that is provided and consumed during
 instantiation. How this works is described in the
@@ -225,15 +227,15 @@ instance, the `core export` of a core module instance and a definition of an
 `outer` component (containing the current component):
 ```
 alias            ::= (alias <aliastarget> (<sort> <id>?))
-aliastarget      ::= export <instanceidx> <name>
-                   | core export <core:instanceidx> <name>
+aliastarget      ::= export <instanceidx> <exportname>
+                   | core export <core:instanceidx> <core:name>
                    | outer <u32> <u32>
 ```
 If present, the `id` of the alias is bound to the new index added by the alias
 and can be used anywhere a normal `id` can be used.
 
-In the case of `export` aliases, validation ensures `name` is an export in the
-target instance and has a matching sort.
+In the case of `export` aliases, validation ensures `exportname` is an export
+in the target instance and has a matching sort.
 
 In the case of `outer` aliases, the `u32` pair serves as a [de Bruijn
 index], with first `u32` being the number of enclosing components/modules to
@@ -358,8 +360,8 @@ core:moduledecl  ::= <core:importdecl>
                    | <core:exportdecl>
 core:alias       ::= (alias <core:aliastarget> (<core:sort> <id>?))
 core:aliastarget ::= outer <u32> <u32>
-core:importdecl  ::= (import <name> <name> <core:importdesc>)
-core:exportdecl  ::= (export <name> <core:exportdesc>)
+core:importdecl  ::= (import <core:name> <core:name> <core:importdesc>)
+core:exportdecl  ::= (export <core:name> <core:exportdesc>)
 core:exportdesc  ::= strip-id(<core:importdesc>)
 
 where strip-id(X) parses '(' sort Y ')' when X parses '(' sort <id>? Y ')'
@@ -452,6 +454,10 @@ defvaltype    ::= bool
                 | (union <valtype>+)
                 | (option <valtype>)
                 | (result <valtype>? (error <valtype>)?)
+name          ::= <word>
+                | <name>-<word>
+word          ::= [a-z][0-9a-z]*
+                | [A-Z][0-9A-Z]*
 valtype       ::= <typeidx>
                 | <defvaltype>
 functype      ::= (func <paramlist> <resultlist>)
@@ -467,8 +473,8 @@ instancedecl  ::= core-prefix(<core:type>)
                 | <type>
                 | <alias>
                 | <exportdecl>
-importdecl    ::= (import <name> bind-id(<externdesc>))
-exportdecl    ::= (export <name> <externdesc>)
+importdecl    ::= (import <importname> <interface>? bind-id(<externdesc>))
+exportdecl    ::= (export <exportname> <interface>? <externdesc>)
 externdesc    ::= (<sort> (type <u32>) )
                 | core-prefix(<core:moduletype>)
                 | <functype>
@@ -503,6 +509,17 @@ value so that:
 2. producers of NaN values across component boundaries do not develop brittle
    assumptions that NaN payload bits are preserved by the other side (since
    they often aren't).
+
+The definition of `name` above corresponds to [Kebab Case]. The intention with
+this less-common form of casing is that each language binding can (and often
+*must*, due to hyphens being invalid identifiers) map the sequence of `word`s
+in a `name` to the language's own idiomatic casing scheme, with all-caps
+`word`s being interpreted as acronyms. For example, the `name` `is-XML`
+could be mapped to `isXML`, `IsXml`, `is_XML`, etc. The highly-restricted
+character set ensures that capitalization is trivial and does not require
+consulting Unicode tables which. Having this structured data encoded as a plain
+string provides a single canonical name for use in tools and language-agnostic
+contexts, without requiring each to invent its own custom interpretation.
 
 The subtyping between all these types is described in a separate
 [subtyping explainer](Subtyping.md). Of note here, though: the optional
@@ -564,6 +581,9 @@ bound for use within the type. Following the precedent of [`core:typeuse`], the
 text format allows both references to out-of-line type definitions (via
 `(type <typeidx>)`) and inline type expressions that the text format desugars
 into out-of-line type definitions.
+
+The definition of `importname`, `exportname` and `impl` are given in the
+[imports and exports](#import-and-export-definitions) section below.
 
 The `value` case of `externdesc` describes a runtime value that is imported or
 exported at instantiation time as described in the
@@ -803,12 +823,29 @@ of core linear memory.
 
 ### Import and Export Definitions
 
-Lastly, imports and exports are defined in terms of the above as:
+Lastly, imports and exports are defined as:
 ```
-import ::= <importdecl>
-export ::= (export <name> <sortidx>)
+import     ::= (import <name> <URL>* bind-id(<externdesc>))
+export     ::= (export <name> <URL>* <sortidx>)
 ```
-All import and export names within a component must be unique, respectively.
+
+---- scratch below ----
+
+The `URL` field of an `externname` allows a component author to refer to an
+externally-defined description of what the component wants (for imports) or
+claims to have implemented (for exports). One example would be a URL naming a
+WASI standard interface such as `https://webassembly.org/wasi/filesystem`. (If
+WASI was able to register the `wasi` scheme with IANA, this could be shortened
+to `wasi:filesystem`, as is often assumed in examples.) Non-standard interfaces
+could also be used, supplying a URL that resolves to a [`.wit`](WIT.md) file
+published to some public registry. In the context of `module` or `component`
+imports, a URL could resolve to a `.wasm` file used to satisfy the import
+(enabling code sharing with all other clients of the same `.wasm` file). In the
+context of an `instance` import, a URL could perform a version query made to a
+package registry, with the expectation that the "someone else" would perform
+version resolution to figure out the precise `.wasm`, instantiate it, and
+supply the resulting instance (possibly using the Component Model itself, as in
+the [lockfile example]).
 
 With what's defined so far, we can write a component that imports, links and
 exports other components:
@@ -909,6 +946,8 @@ Lastly, when given a component binary, the compile-then-instantiate overloads
 of `WebAssembly.instantiate(Streaming)` would inherit the compound behavior of
 the abovementioned functions (again, using the `layer` field to eagerly
 distinguish between modules and components).
+
+TODO: describe how kebab-names are interpreted
 
 For example, the following component:
 ```wasm
@@ -1059,6 +1098,8 @@ when `bar.wasm` is loaded as an ESM:
 <script src="bar.wasm" type="module"></script>
 ```
 
+TODO: how `importname`/`exportname` are interpreted
+
 
 ## Examples
 
@@ -1087,6 +1128,7 @@ and will be added over the coming months to complete the MVP proposal:
 [Index Space]: https://webassembly.github.io/spec/core/syntax/modules.html#indices
 [Abbreviations]: https://webassembly.github.io/spec/core/text/conventions.html#abbreviations
 
+[`core:name`]: https://webassembly.github.io/spec/core/syntax/values.html#syntax-name
 [`core:module`]: https://webassembly.github.io/spec/core/text/modules.html#text-module
 [`core:type`]: https://webassembly.github.io/spec/core/text/modules.html#types
 [`core:importdesc`]: https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
@@ -1116,6 +1158,7 @@ and will be added over the coming months to complete the MVP proposal:
 [JS Tuple]: https://github.com/tc39/proposal-record-tuple
 [JS Record]: https://github.com/tc39/proposal-record-tuple
 
+[Kebab Case]: https://en.wikipedia.org/wiki/Letter_case#Kebab_case
 [De Bruijn Index]: https://en.wikipedia.org/wiki/De_Bruijn_index
 [Closure]: https://en.wikipedia.org/wiki/Closure_(computer_programming)
 [Empty Type]: https://en.wikipedia.org/w/index.php?title=Empty_type
@@ -1131,6 +1174,9 @@ and will be added over the coming months to complete the MVP proposal:
 [Linear]: https://en.wikipedia.org/wiki/Substructural_type_system#Linear_type_systems
 [Interface Definition Language]: https://en.wikipedia.org/wiki/Interface_description_language
 
+[URL]: https://url.spec.whatwg.org
+[Import Maps]: https://wicg.github.io/import-maps/
+
 [module-linking]: https://github.com/WebAssembly/module-linking/blob/main/design/proposals/module-linking/Explainer.md
 [interface-types]: https://github.com/WebAssembly/interface-types/blob/main/proposals/interface-types/Explainer.md
 [type-imports]: https://github.com/WebAssembly/proposal-type-imports/blob/master/proposals/type-imports/Overview.md
@@ -1142,9 +1188,11 @@ and will be added over the coming months to complete the MVP proposal:
 [Adapter Functions]: FutureFeatures.md#custom-abis-via-adapter-functions
 [Canonical ABI]: CanonicalABI.md
 [Shared-Nothing]: ../high-level/Choices.md
+[Intended Host Embeddings]: ../high-level/UseCases.md#hosts-embedding-components
 
 [`wizer`]: https://github.com/bytecodealliance/wizer
 
 [Scoping and Layering]: https://docs.google.com/presentation/d/1PSC3Q5oFsJEaYyV5lNJvVgh-SNxhySWUqZ6puyojMi8
 [Resource and Handle Types]: https://docs.google.com/presentation/d/1ikwS2Ps-KLXFofuS5VAs6Bn14q4LBEaxMjPfLj61UZE
 [Future and Stream Types]: https://docs.google.com/presentation/d/1MNVOZ8hdofO3tI0szg_i-Yoy0N2QPU2C--LzVuoGSlE
+[Lockfile Example]: https://docs.google.com/presentation/d/11lY9GBghZJ5nCFrf4MKWVrecQude0xy_buE--tnO9kQ
