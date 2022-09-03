@@ -428,7 +428,7 @@ module types always start with an empty type index space.
 )
 ```
 
-Component-level type definitions are symmetric to core-level type definitions,
+Component-level type definitions are similar to core-level type definitions,
 but use a completely different set of value types. Unlike [`core:valtype`]
 which is low-level and assumes a shared linear memory for communicating
 compound values, component-level value types assume no shared memory and must
@@ -464,19 +464,25 @@ instancetype  ::= (instance <instancedecl>*)
 componentdecl ::= <importdecl>
                 | <instancedecl>
 instancedecl  ::= core-prefix(<core:type>)
-                | <type>
+                | (type <typebound>)
+                | (core module <typeidx>)
+                | (func <typeidx>)
+                | (value <typeidx>)
+                | (instance <typeidx>)
+                | (component <typeidx>)
                 | <alias>
                 | <exportdecl>
-importdecl    ::= (import <name> bind-id(<externdesc>))
-exportdecl    ::= (export <name> <externdesc>)
-externdesc    ::= (<sort> (type <u32>) )
+importdecl    ::= (import <name> bind-id(<importdesc>))
+typedecl      ::= (type <id>? <typebound>)
+exportdecl    ::= (export <name> <sortidx>)
+importdesc    ::= (<sort> (type <u32>) )
                 | core-prefix(<core:moduletype>)
                 | <functype>
                 | <componenttype>
                 | <instancetype>
                 | (value <valtype>)
                 | (type <typebound>)
-typebound     ::= (eq <typeidx>)
+typebound     ::= (eq <defype>)
 
 where bind-id(X) parses '(' sort <id>? Y ')' when X parses '(' sort Y ')'
 ```
@@ -548,40 +554,58 @@ also be defined as standalone, human-friendly text files in the [`wit`](WIT.md)
 [Interface Definition Language].
 
 The `component` type constructor is symmetric to the core `module` type
-constructor and contains *two* lists of named definitions for the imports
-and exports of a component, respectively. As suggested above, instance types
-can show up in *both* the import and export types of a component type.
+constructor and contains *two* lists of named definitions for the imports and
+exports of a component, respectively. As suggested above, instance types can
+show up in *both* the import and export types of a component type.
 
 Both `instance` and `component` type constructors are built from a sequence of
-"declarators", of which there are four kinds&mdash;`type`, `alias`, `import` and
-`export`&mdash;where only `component` type constructors can contain `import`
-declarators. The meanings of these declarators is basically the same as the
-core module declarators introduced above.
+"declarators". There are four basic forms of declarators: definition
+declarators (consisting of one form for each definition sort that may be
+involved in a component import or export); alias declarators; export
+declarators; and import declarators (which may be present only in component
+types).
 
-As with core modules, `importdecl` and `exportdecl` classify component `import`
-and `export` definitions, with `importdecl` allowing an identifier to be
-bound for use within the type. Following the precedent of [`core:typeuse`], the
-text format allows both references to out-of-line type definitions (via
-`(type <typeidx>)`) and inline type expressions that the text format desugars
-into out-of-line type definitions.
+An instance or component type constructor has its own local set of index
+spaces, which connect declarations of particular definitions (which may be
+introduced by a local definition declarator, an import declarator, or an alias
+declarator) to export declarations. This separation between the declaration of
+an item and its actual exporting is provided to allow for future forms of
+dependency between exports; at present, it is used nearly exclusively for type
+declarations, which may both be exported directly and used to define the types
+of later exports.
 
-The `value` case of `externdesc` describes a runtime value that is imported or
-exported at instantiation time as described in the
-[start definitions](#start-definitions) section below.
+Except for the `type` declarator, the definition declarators all simply
+associate an entry in the appropriate index space with a type (which, as
+syntactic sugar, may in the text format be written inline in the declarators).
+The `type` declarator, rather than taking the definition of the type directly,
+takes a "type bound" describing an imported or exported type because
+when [resource and handle types] are added to the explainer, `typebound` will be
+extended with a `sub` option (symmetric to the [type-imports] proposal) that
+allows importing and exporting *abstract* types.
 
-The `type` case of `externdesc` describes an imported or exported type along
-with its bounds. The bounds currently only have an `eq` option that says that
-the imported/exported type must be exactly equal to the referenced type. There
-are two main use cases for this in the short-term:
+There are two main use cases for exporting (non-resource) types in the
+short-term:
 * Type exports allow a component or interface to associate a name with a
   structural type (e.g., `(export "nanos" (type (eq u64)))`) which bindings
   generators can use to generate type aliases (e.g., `typedef uint64_t nanos;`).
 * Type imports and exports can provide additional information to toolchains and
   runtimes for defining the behavior of host APIs.
 
-When [resource and handle types] are added to the explainer, `typebound` will
-be extended with a `sub` option (symmetric to the [type-imports] proposal) that
-allows importing and exporting *abstract* types.
+Export declarators take only a name and an index into the local index space,
+since the declarator that created that entry will have specified its
+classification; hence there is no need in the surface syntax for an analogue to
+`core:exportdecl` to classify a component's exports. As syntactic sugar, in the
+text format, a definition declarator may be written inline in an export
+declaration.
+
+Component import and alias declarators are analagous to the core module
+declarators introduced above, and have essentially the same meaning, although
+they also (like the import and alias _definitions_ present inside a component)
+create entries in the local index spaces that may later be exported. As with
+core modules, `importdecl` classifies a component's `import` definitions.
+
+Note that values are imported or exported at _instantiation time_, as described
+in the [start-definitions](#start-definitions) section below.
 
 With what's defined so far, we can define component types using a mix of inline
 and out-of-line type definitions:
